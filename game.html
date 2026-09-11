@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Puppy Run</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+    body {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      background-color: #0d0f18;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      color: #fff;
+      overflow: hidden;
+      touch-action: manipulation;
+    }
+    .game-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      max-width: 900px;
+      padding: 5px;
+    }
+    canvas {
+      width: 100%;
+      height: auto;
+      max-height: 70vh;
+      border: 3px solid #3a3f58;
+      border-radius: 8px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+      background-color: #1a1c29;
+      aspect-ratio: 2 / 1;
+    }
+    .controls-hint { 
+      color: #8b92b2; 
+      font-size: 13px; 
+      text-align: center; 
+    }
+
+    /* Touch Controls for Mobile / Tablets */
+    .touch-controls {
+      display: none;
+      width: 100%;
+      max-width: 800px;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 10px;
+      margin-top: 5px;
+    }
+    @media (max-width: 1024px), (pointer: coarse) {
+      .touch-controls { display: flex; }
+      .controls-hint { display: none; }
+    }
+    .touch-group {
+      display: flex;
+      gap: 10px;
+    }
+    .touch-btn {
+      width: 55px;
+      height: 55px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      color: #fff;
+      font-weight: bold;
+      font-size: 14px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      touch-action: manipulation;
+    }
+    .touch-btn:active {
+      background: rgba(255, 255, 255, 0.4);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="game-wrapper">
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+    <div class="controls-hint">
+      <strong>A / D</strong>: Move | <strong>Space / W</strong>: Jump | <strong>X</strong>: Dash | <strong>C</strong>: Crawl
+    </div>
+
+    <div class="touch-controls">
+      <div class="touch-group">
+        <button class="touch-btn" id="btnLeft">◄</button>
+        <button class="touch-btn" id="btnRight">►</button>
+      </div>
+      <div class="touch-group">
+        <button class="touch-btn" id="btnCrawl">C</button>
+        <button class="touch-btn" id="btnDash">X</button>
+        <button class="touch-btn" id="btnJump">▲</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Load Game Base Assets
+    const dogImage = new Image();
+    dogImage.src = 'dog.png'; 
+
+    const dashImage = new Image();
+    dashImage.src = 'dash.png'; 
+
+    const crawlImage = new Image();
+    crawlImage.src = 'crawl.png'; 
+
+    const bgImage = new Image();
+    bgImage.src = 'istockphoto-498656550-612x612.jpg';
+
+    const spikeImage = new Image();
+    spikeImage.src = 'images.png';
+
+    const hpPlusImage = new Image();
+    hpPlusImage.src = 'hp.png'; 
+
+    const bombImage = new Image();
+    bombImage.src = 'Screenshot_20260909_082311_Samsung_Notes-removebg-preview.png'; 
+
+    const tigerImage = new Image();
+    tigerImage.src = 'Screenshot_20260909_081536_Samsung_Notes-removebg-preview.png';
+
+    const eagleImage = new Image();
+    eagleImage.src = 'Screenshot_20260908_214600_Samsung_Notes-removebg-preview.png';
+
+    // Game Variables
+    let dog = {
+      x: 100, 
+      y: 280, 
+      width: 75,       
+      height: 60,
+      dashWidth: 85,   
+      dashHeight: 50,
+      crawlWidth: 70,  
+      crawlHeight: 45,
+      velocityY: 0, 
+      velocityX: 0, 
+      speed: 6,
+      jumpForce: -13, 
+      gravity: 0.65, 
+      isGrounded: false,
+      hp: 100, 
+      maxHp: 100, 
+      invulnerableTimer: 0,
+      isDashing: false, 
+      dashTimer: 0, 
+      dashCooldown: 0, 
+      dashSpeed: 16,
+      facingDirection: -1, 
+      dashDir: -1,
+      isCrawling: false
+    };
+
+    let tiger = {
+      x: -150,
+      y: 270,
+      width: 100,
+      height: 70,
+      speed: 1.8,
+      active: false,
+      escaping: false
+    };
+
+    let isGameCleared = false;
+    let obstacles = [];
+    let cats = [];
+    let eagles = [];
+    let hpItems = [];
+    let bombs = [];
+    let explosionParticles = [];
+    let scratchEffects = [];
+    let healTexts = [];
+    let particles = [];
+    let score = 0;
+    let nextHpScoreThreshold = 50; 
+    let gameTime = 0;
+    let isGameOver = false;
+    let bgScroll = 0;
+    let sunriseProgress = 0; 
+
+    const keys = { left: false, right: false };
+
+    // Keyboard Input
+    window.addEventListener('keydown', (e) => {
+      let key = e.key.toLowerCase();
+
+      if (key === 'arrowleft' || key === 'a') {
+        keys.left = true;
+        dog.facingDirection = -1;
+      }
+      if (key === 'arrowright' || key === 'd') {
+        keys.right = true;
+        dog.facingDirection = 1;
+      }
+
+      if ((key === 'arrowup' || key === 'w' || e.key === ' ') && dog.isGrounded && !dog.isCrawling && !isGameCleared) {
+        performJump();
+      }
+
+      if (key === 'x' && dog.dashCooldown === 0 && !dog.isCrawling && !isGameCleared) {
+        performDash();
+      }
+
+      if (key === 'c' && dog.isGrounded && !isGameCleared) {
+        dog.isCrawling = true;
+      }
+
+      if ((isGameOver || isGameCleared) && e.key === ' ') restartGame();
+    });
+
+    window.addEventListener('keyup', (e) => {
+      let key = e.key.toLowerCase();
+      if (key === 'arrowleft' || key === 'a') keys.left = false;
+      if (key === 'arrowright' || key === 'd') keys.right = false;
+      if (key === 'c') dog.isCrawling = false;
+    });
+
+    // Touch Controls
+    function bindTouch(id, onStart, onEnd) {
+      const btn = document.getElementById(id);
+      btn.addEventListener('touchstart', (e) => { e.preventDefault(); onStart(); }, { passive: false });
+      btn.addEventListener('touchend', (e) => { e.preventDefault(); if (onEnd) onEnd(); }, { passive: false });
+      btn.addEventListener('mousedown', (e) => { e.preventDefault(); onStart(); });
+      btn.addEventListener('mouseup', (e) => { e.preventDefault(); if (onEnd) onEnd(); });
+    }
+
+    bindTouch('btnLeft', () => { keys.left = true; dog.facingDirection = -1; }, () => { keys.left = false; });
+    bindTouch('btnRight', () => { keys.right = true; dog.facingDirection = 1; }, () => { keys.right = false; });
+    bindTouch('btnJump', () => { if (isGameOver || isGameCleared) restartGame(); else performJump(); });
+    bindTouch('btnDash', () => { performDash(); });
+    bindTouch('btnCrawl', () => { if (dog.isGrounded) dog.isCrawling = true; }, () => { dog.isCrawling = false; });
+
+    canvas.addEventListener('click', () => {
+      if (isGameOver || isGameCleared) restartGame();
+    });
+
+    function performJump() {
+      if (dog.isGrounded && !dog.isCrawling && !isGameCleared) {
+        dog.velocityY = dog.jumpForce;
+        dog.isGrounded = false;
+        createDustParticles(dog.x + dog.width / 2, dog.y + dog.height);
+      }
+    }
+
+    function performDash() {
+      if (dog.dashCooldown === 0 && !dog.isCrawling && !isGameCleared) {
+        dog.isDashing = true;
+        dog.dashDir = dog.facingDirection;
+        dog.dashTimer = 15;
+        dog.dashCooldown = 60;
+        dog.invulnerableTimer = 15;
+      }
+    }
+
+    function createDustParticles(x, y) {
+      for (let i = 0; i < 8; i++) {
+        particles.push({
+          x: x, y: y,
+          vx: (Math.random() - 0.5) * 4,
+          vy: (Math.random() - 1) * 2,
+          radius: Math.random() * 3 + 2,
+          alpha: 1
+        });
+      }
+    }
+
+    function createExplosionParticles(x, y) {
+      for (let i = 0; i < 50; i++) {
+        let angle = Math.random() * Math.PI * 2;
+        let speed = Math.random() * 10 + 3;
+        explosionParticles.push({
+          x: x, y: y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          radius: Math.random() * 8 + 4,
+          color: ['#ff1744', '#ff9100', '#ffea00'][Math.floor(Math.random() * 3)],
+          alpha: 1
+        });
+      }
+    }
+
+    function createScratchEffect(x, y) {
+      scratchEffects.push({ x: x, y: y, timer: 15 });
+    }
+
+    function createHealText(x, y) {
+      healTexts.push({ x: x, y: y, alpha: 1, timer: 40 });
+    }
+
+    function spawnObstacle() {
+      obstacles.push({
+        x: canvas.width + 50,
+        y: 295,
+        width: 40,
+        height: 45,
+        speed: 4.5 + Math.min(score * 0.005, 5)
+      });
+    }
+
+    function spawnCat() {
+      cats.push({
+        x: canvas.width + 40,
+        y: 305,
+        width: 45,
+        height: 35,
+        speed: 5.5 + Math.min(score * 0.006, 6)
+      });
+    }
+
+    function spawnEagle() {
+      if (score < 200 || score >= 300) return;
+
+      let heights = [245, 220]; 
+      let selectedY = heights[Math.floor(Math.random() * heights.length)];
+
+      eagles.push({
+        x: canvas.width + 50,
+        y: selectedY,
+        width: 70,
+        height: 50,
+        speed: 7.5 + Math.min(score * 0.008, 6)
+      });
+    }
+
+    function spawnHpItem() {
+      hpItems.push({
+        x: Math.random() * (canvas.width - 250) + 150,
+        y: -40,
+        targetY: 305,
+        width: 32,
+        height: 32,
+        speedY: 3.5,
+        speedX: 3.0,
+        shakeTimer: Math.random() * Math.PI * 2
+      });
+    }
+
+    function spawnBomb() {
+      if (score < 400) return;
+      
+      let currentWidth = dog.width;
+      if (dog.isDashing) currentWidth = dog.dashWidth;
+      else if (dog.isCrawling) currentWidth = dog.crawlWidth;
+
+      let targetX = dog.x + currentWidth / 2 - 20;
+
+      bombs.push({
+        x: targetX,
+        y: -50,
+        targetY: 290,
+        width: 45,
+        height: 50,
+        speedY: 7,
+        timer: 180, 
+        maxTimer: 180,
+        isGrounded: false,
+        radius: 120 
+      });
+    }
+
+    function drawBackground() {
+      if (!isGameCleared) {
+        bgScroll = (bgScroll + 1.5) % canvas.width;
+      }
+
+      if (score >= 400) {
+        if (sunriseProgress < 1) sunriseProgress += 0.005;
+      }
+
+      if (bgImage.complete && bgImage.naturalWidth !== 0 && sunriseProgress < 1) {
+        ctx.save();
+        ctx.globalAlpha = 1 - sunriseProgress;
+        ctx.drawImage(bgImage, -bgScroll, 0, canvas.width, 340);
+        ctx.drawImage(bgImage, canvas.width - bgScroll, 0, canvas.width, 340);
+        ctx.restore();
+      }
+
+      if (sunriseProgress > 0) {
+        ctx.save();
+        ctx.globalAlpha = sunriseProgress;
+
+        let skyGrad = ctx.createLinearGradient(0, 0, 0, 340);
+        skyGrad.addColorStop(0, '#ff7e5f');
+        skyGrad.addColorStop(0.5, '#feb47b');
+        skyGrad.addColorStop(1, '#ffeccc');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, canvas.width, 340);
+
+        let sunY = 260 - (sunriseProgress * 140);
+        let sunGrad = ctx.createRadialGradient(400, sunY, 10, 400, sunY, 120);
+        sunGrad.addColorStop(0, '#ffffff');
+        sunGrad.addColorStop(0.3, '#fff3a0');
+        sunGrad.addColorStop(1, 'rgba(255, 230, 100, 0)');
+        ctx.fillStyle = sunGrad;
+        ctx.beginPath();
+        ctx.arc(400, sunY, 120, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      } else if (!bgImage.complete || bgImage.naturalWidth !== 0) {
+        let skyGrad = ctx.createLinearGradient(0, 0, 0, 340);
+        skyGrad.addColorStop(0, '#0f1026');
+        skyGrad.addColorStop(1, '#2b1b4d');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, canvas.width, 340);
+      }
+
+      ctx.fillStyle = sunriseProgress > 0.5 ? '#3e2723' : '#1e1b2e';
+      ctx.fillRect(0, 340, canvas.width, 60);
+      ctx.fillStyle = sunriseProgress > 0.5 ? '#ffb300' : '#8a2be2';
+      ctx.fillRect(0, 340, canvas.width, 4);
+    }
+
+    function drawDog() {
+      if (isGameCleared) return;
+
+      ctx.save();
+
+      if (dog.invulnerableTimer > 0 && Math.floor(Date.now() / 50) % 2 === 0) {
+        ctx.globalAlpha = 0.4;
+      }
+
+      let activeImage = dogImage;
+      let drawWidth = dog.width;
+      let drawHeight = dog.height;
+
+      if (dog.isDashing) {
+        activeImage = dashImage;
+        drawWidth = dog.dashWidth;
+        drawHeight = dog.dashHeight;
+      } else if (dog.isCrawling) {
+        activeImage = crawlImage;
+        drawWidth = dog.crawlWidth;
+        drawHeight = dog.crawlHeight;
+      }
+
+      let drawY = dog.y;
+
+      if (activeImage.complete && activeImage.naturalWidth !== 0) {
+        if (dog.facingDirection === -1) {
+          ctx.translate(dog.x + drawWidth, drawY);
+          ctx.scale(-1, 1);
+          ctx.drawImage(activeImage, 0, 0, drawWidth, drawHeight);
+        } else {
+          ctx.drawImage(activeImage, dog.x, drawY, drawWidth, drawHeight);
+        }
+      } else {
+        ctx.fillStyle = dog.isDashing ? '#00e5ff' : (dog.isCrawling ? '#f39c12' : '#b86f3b');
+        ctx.fillRect(dog.x, drawY, drawWidth, drawHeight);
+      }
+
+      ctx.restore();
+    }
+
+    function drawTiger() {
+      if (!tiger.active && tiger.x < -100) return;
+
+      ctx.save();
+      let faceLeft = dog.x < tiger.x || tiger.escaping;
+
+      if (tigerImage.complete && tigerImage.naturalWidth !== 0) {
+        if (faceLeft) {
+          ctx.translate(tiger.x + tiger.width, tiger.y);
+          ctx.scale(-1, 1);
+          ctx.drawImage(tigerImage, 0, 0, tiger.width, tiger.height);
+        } else {
+          ctx.drawImage(tigerImage, tiger.x, tiger.y, tiger.width, tiger.height);
+        }
+      } else {
+        ctx.fillStyle = '#f39c12';
+        ctx.fillRect(tiger.x, tiger.y, tiger.width, tiger.height);
+      }
+      ctx.restore();
+    }
+
+    function drawObstacles() {
+      obstacles.forEach(obs => {
+        if (spikeImage.complete && spikeImage.naturalWidth !== 0) {
+          ctx.drawImage(spikeImage, obs.x, obs.y, obs.width, obs.height);
+        } else {
+          ctx.fillStyle = '#ff3b5c';
+          ctx.beginPath();
+          ctx.moveTo(obs.x, obs.y + obs.height);
+          ctx.lineTo(obs.x + obs.width / 2, obs.y);
+          ctx.lineTo(obs.x + obs.width, obs.y + obs.height);
+          ctx.fill();
+        }
+      });
+    }
+
+    function drawCats() {
+      cats.forEach(cat => {
+        ctx.save();
+        ctx.fillStyle = '#e67e22';
+        ctx.fillRect(cat.x, cat.y + 10, cat.width, cat.height - 10);
+        ctx.fillRect(cat.x - 5, cat.y + 2, 20, 20);
+
+        ctx.fillStyle = '#d35400';
+        ctx.beginPath();
+        ctx.moveTo(cat.x - 4, cat.y + 2);
+        ctx.lineTo(cat.x, cat.y - 8);
+        ctx.lineTo(cat.x + 4, cat.y + 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#f1c40f';
+        ctx.fillRect(cat.x - 2, cat.y + 6, 4, 4);
+        ctx.restore();
+      });
+    }
+
+    function drawEagles() {
+      eagles.forEach(eagle => {
+        ctx.save();
+        if (eagleImage.complete && eagleImage.naturalWidth !== 0) {
+          ctx.drawImage(eagleImage, eagle.x, eagle.y, eagle.width, eagle.height);
+        } else {
+          ctx.fillStyle = '#8e44ad';
+          ctx.fillRect(eagle.x, eagle.y, eagle.width, eagle.height);
+        }
+        ctx.restore();
+      });
+    }
+
+    function drawHpItems() {
+      hpItems.forEach(item => {
+        ctx.save();
+        let shakeX = Math.sin(item.shakeTimer * 12) * 3;
+        let shakeY = Math.cos(item.shakeTimer * 10) * 2;
+
+        ctx.translate(item.x + item.width / 2 + shakeX, item.y + item.height / 2 + shakeY);
+
+        if (hpPlusImage.complete && hpPlusImage.naturalWidth !== 0) {
+          ctx.drawImage(hpPlusImage, -item.width / 2, -item.height / 2, item.width, item.height);
+        } else {
+          ctx.fillStyle = '#2ecc71';
+          ctx.fillRect(-12, -4, 24, 8);
+          ctx.fillRect(-4, -12, 8, 24);
+        }
+
+        ctx.restore();
+      });
+    }
+
+    function drawBombs() {
+      bombs.forEach(b => {
+        ctx.save();
+
+        let centerX = b.x + b.width / 2;
+        let groundY = b.targetY + b.height;
+
+        if (b.isGrounded) {
+          let flash = Math.floor(Date.now() / 150) % 2 === 0;
+          ctx.fillStyle = flash ? 'rgba(255, 23, 68, 0.35)' : 'rgba(255, 23, 68, 0.15)';
+          ctx.strokeStyle = '#ff1744';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.ellipse(centerX, groundY - 5, b.radius, 25, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          let secondsLeft = Math.ceil(b.timer / 60);
+          ctx.fillStyle = '#ff1744';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.fillText(`${secondsLeft}s!`, centerX - 10, b.y - 10);
+        }
+
+        if (bombImage.complete && bombImage.naturalWidth !== 0) {
+          ctx.drawImage(bombImage, b.x, b.y, b.width, b.height);
+        } else {
+          ctx.fillStyle = '#212121';
+          ctx.beginPath();
+          ctx.arc(centerX, b.y + b.height / 2, b.width / 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        ctx.restore();
+      });
+    }
+
+    function drawExplosionParticles() {
+      for (let i = explosionParticles.length - 1; i >= 0; i--) {
+        let p = explosionParticles[i];
+        ctx.save();
+        ctx.globalAlpha = p.alpha;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        p.x += p.vx;
+        p.y += p.vy;
+        p.alpha -= 0.025;
+        if (p.alpha <= 0) explosionParticles.splice(i, 1);
+      }
+    }
+
+    function drawScratchEffects() {
+      for (let i = scratchEffects.length - 1; i >= 0; i--) {
+        let s = scratchEffects[i];
+        ctx.save();
+        ctx.strokeStyle = '#ff1744';
+        ctx.lineWidth = 3;
+        for (let j = 0; j < 3; j++) {
+          let offset = j * 8;
+          ctx.beginPath();
+          ctx.moveTo(s.x + offset, s.y);
+          ctx.lineTo(s.x - 15 + offset, s.y + 35);
+          ctx.stroke();
+        }
+        ctx.restore();
+        s.timer--;
+        if (s.timer <= 0) scratchEffects.splice(i, 1);
+      }
+    }
+
+    function drawHealTexts() {
+      for (let i = healTexts.length - 1; i >= 0; i--) {
+        let h = healTexts[i];
+        ctx.save();
+        ctx.fillStyle = `rgba(46, 204, 113, ${h.alpha})`;
+        ctx.font = 'bold 20px sans-serif';
+        ctx.fillText('+20 HP!', h.x, h.y);
+        ctx.restore();
+
+        h.y -= 1;
+        h.timer--;
+        h.alpha = h.timer / 40;
+        if (h.timer <= 0) healTexts.splice(i, 1);
+      }
+    }
+
+    function drawUI() {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(20, 20, 204, 24);
+      
+      let hpPercentage = Math.max(0, dog.hp / dog.maxHp);
+      ctx.fillStyle = hpPercentage > 0.4 ? '#2ecc71' : '#e74c3c';
+      ctx.fillRect(22, 22, 200 * hpPercentage, 20);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText(`HP: ${Math.ceil(dog.hp)} / ${dog.maxHp}`, 85, 36);
+
+      ctx.font = 'bold 12px sans-serif';
+      if (dog.dashCooldown === 0) {
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillText('DASH READY [X]', 20, 60);
+      } else {
+        ctx.fillStyle = '#78909c';
+        ctx.fillText(`DASH: ${Math.ceil(dog.dashCooldown / 10)}s`, 20, 60);
+      }
+
+      ctx.font = 'bold 18px monospace';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(`SCORE: ${Math.floor(score)}`, canvas.width - 160, 38);
+
+      if (!isGameCleared) {
+        if (tiger.active) {
+          ctx.fillStyle = '#ff1744';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.fillText('⚠️ TIGER CHASE! RUN! ⚠️', canvas.width / 2 - 100, 38);
+        } else if (score >= 200 && score < 300) {
+          ctx.fillStyle = '#f39c12';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.fillText('🦅 EAGLE ATTACK! CRAWL [C] TO DODGE! 🦅', canvas.width / 2 - 170, 38);
+        } else if (score >= 400) {
+          ctx.fillStyle = '#ff1744';
+          ctx.font = 'bold 16px sans-serif';
+          ctx.fillText('💣 BOMB DROPPED ON YOU! ESCAPE RED ZONE! 💣', canvas.width / 2 - 200, 38);
+        }
+      }
+    }
+
+    function update() {
+      if (score >= 600 && !isGameCleared) {
+        isGameCleared = true;
+        obstacles = [];
+        cats = [];
+        eagles = [];
+        bombs = [];
+        hpItems = [];
+        tiger.active = false;
+        tiger.escaping = true;
+      }
+
+      if (isGameCleared || isGameOver) return;
+
+      gameTime++;
+      score += 0.1;
+
+      if (score >= nextHpScoreThreshold) {
+        spawnHpItem();
+        nextHpScoreThreshold += 50;
+      }
+
+      if (dog.dashCooldown > 0) dog.dashCooldown--;
+
+      let currentWidth = dog.width;
+      let currentHeight = dog.height;
+
+      if (dog.isDashing) {
+        currentWidth = dog.dashWidth;
+        currentHeight = dog.dashHeight;
+      } else if (dog.isCrawling) {
+        currentWidth = dog.crawlWidth;
+        currentHeight = dog.crawlHeight;
+      }
+
+      if (dog.isDashing) {
+        dog.x += dog.dashDir * dog.dashSpeed;
+        dog.x = Math.max(10, Math.min(canvas.width - currentWidth - 10, dog.x));
+        dog.dashTimer--;
+        if (dog.dashTimer <= 0) dog.isDashing = false;
+      } else {
+        let moveSpeed = dog.isCrawling ? dog.speed * 0.5 : dog.speed;
+
+        if (keys.left) { 
+          dog.x = Math.max(10, dog.x - moveSpeed); 
+        }
+        if (keys.right) { 
+          dog.x = Math.min(canvas.width - currentWidth - 10, dog.x + moveSpeed); 
+        }
+      }
+
+      dog.velocityY += dog.gravity;
+      dog.y += dog.velocityY;
+
+      if (dog.y + currentHeight >= 340) {
+        dog.y = 340 - currentHeight;
+        dog.velocityY = 0;
+        dog.isGrounded = true;
+      }
+
+      if (dog.invulnerableTimer > 0) dog.invulnerableTimer--;
+
+      if (score >= 100 && score < 200) {
+        tiger.active = true;
+        tiger.escaping = false;
+      } else if (score >= 200) {
+        tiger.active = false;
+        tiger.escaping = true;
+      }
+
+      if (tiger.active) {
+        let targetTigerX = dog.x - 70;
+        if (tiger.x < targetTigerX) {
+          tiger.x += tiger.speed;
+        } else if (tiger.x > targetTigerX) {
+          tiger.x -= tiger.speed;
+        }
+
+        if (
+          dog.x < tiger.x + tiger.width &&
+          dog.x + currentWidth > tiger.x &&
+          dog.y < tiger.y + tiger.height &&
+          dog.y + currentHeight > tiger.y
+        ) {
+          if (dog.invulnerableTimer === 0) {
+            dog.hp -= 10;
+            dog.invulnerableTimer = 50;
+            createScratchEffect(dog.x + currentWidth / 2, dog.y + 10);
+            if (dog.hp <= 0) { dog.hp = 0; isGameOver = true; }
+          }
+        }
+      } else if (tiger.escaping && tiger.x > -200) {
+        tiger.x -= tiger.speed * 2.5;
+      }
+
+      if (gameTime % 130 === 0) spawnObstacle();
+      if (gameTime % 210 === 0) spawnCat();
+      if (gameTime % 160 === 0) spawnEagle();
+      if (score >= 400 && gameTime % 240 === 0) spawnBomb();
+
+      if (score >= 300 && eagles.length > 0) {
+        eagles = [];
+      }
+
+      for (let i = hpItems.length - 1; i >= 0; i--) {
+        let item = hpItems[i];
+        item.shakeTimer += 0.15;
+
+        if (item.y < item.targetY) {
+          item.y += item.speedY;
+        } else {
+          item.y = item.targetY;
+          item.x -= item.speedX;
+        }
+
+        if (
+          dog.x < item.x + item.width &&
+          dog.x + currentWidth > item.x &&
+          dog.y < item.y + item.height &&
+          dog.y + currentHeight > item.y
+        ) {
+          dog.hp = Math.min(dog.maxHp, dog.hp + 20);
+          createHealText(dog.x + 10, dog.y - 10);
+          hpItems.splice(i, 1);
+          continue;
+        }
+
+        if (item.x + item.width < -20) hpItems.splice(i, 1);
+      }
+
+      for (let i = bombs.length - 1; i >= 0; i--) {
+        let b = bombs[i];
+
+        if (b.y < b.targetY) {
+          b.y += b.speedY;
+        } else {
+          b.y = b.targetY;
+          b.isGrounded = true;
+          b.timer--;
+
+          if (b.timer <= 0) {
+            let bombCenterX = b.x + b.width / 2;
+            let bombCenterY = b.y + b.height / 2;
+            let dogCenterX = dog.x + currentWidth / 2;
+
+            let dist = Math.abs(dogCenterX - bombCenterX);
+            if (dist <= b.radius) {
+              if (dog.invulnerableTimer === 0) {
+                dog.hp -= 15;
+                dog.invulnerableTimer = 45;
+                createScratchEffect(dog.x + currentWidth / 2, dog.y + 10);
+                if (dog.hp <= 0) { dog.hp = 0; isGameOver = true; }
+              }
+            }
+
+            createExplosionParticles(bombCenterX, bombCenterY);
+            bombs.splice(i, 1);
+          }
+        }
+      }
+
+      for (let i = obstacles.length - 1; i >= 0; i--) {
+        let obs = obstacles[i];
+        obs.x -= obs.speed;
+
+        if (
+          dog.x < obs.x + obs.width &&
+          dog.x + currentWidth > obs.x &&
+          dog.y < obs.y + obs.height &&
+          dog.y + currentHeight > obs.y
+        ) {
+          if (dog.invulnerableTimer === 0) {
+            dog.hp -= 5;
+            dog.invulnerableTimer = 40;
+            if (dog.hp <= 0) { dog.hp = 0; isGameOver = true; }
+          }
+        }
+        if (obs.x + obs.width < -20) obstacles.splice(i, 1);
+      }
+
+      for (let i = cats.length - 1; i >= 0; i--) {
+        let cat = cats[i];
+        cat.x -= cat.speed;
+
+        if (
+          dog.x < cat.x + cat.width &&
+          dog.x + currentWidth > cat.x &&
+          dog.y < cat.y + cat.height &&
+          dog.y + currentHeight > cat.y
+        ) {
+          if (dog.invulnerableTimer === 0) {
+            dog.hp -= 10;
+            dog.invulnerableTimer = 45;
+            createScratchEffect(dog.x + currentWidth / 2, dog.y + 10);
+            if (dog.hp <= 0) { dog.hp = 0; isGameOver = true; }
+          }
+        }
+        if (cat.x + cat.width < -20) cats.splice(i, 1);
+      }
+
+      for (let i = eagles.length - 1; i >= 0; i--) {
+        let eagle = eagles[i];
+        eagle.x -= eagle.speed;
+
+        if (
+          dog.x < eagle.x + eagle.width &&
+          dog.x + currentWidth > eagle.x &&
+          dog.y < eagle.y + eagle.height &&
+          dog.y + currentHeight > eagle.y
+        ) {
+          if (dog.invulnerableTimer === 0) {
+            dog.hp -= 10;
+            dog.invulnerableTimer = 45;
+            createScratchEffect(dog.x + currentWidth / 2, dog.y + 10);
+            if (dog.hp <= 0) { dog.hp = 0; isGameOver = true; }
+          }
+        }
+        if (eagle.x + eagle.width < -20) eagles.splice(i, 1);
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawBackground();
+      drawObstacles();
+      drawCats();
+      drawEagles();
+      drawHpItems();
+      drawBombs();
+      drawExplosionParticles();
+      drawTiger();
+      drawDog();
+      drawScratchEffects();
+      drawHealTexts();
+      drawUI();
+
+      if (isGameCleared) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = '#2ecc71';
+        ctx.font = 'bold 48px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('YOU CLEARED', canvas.width / 2, canvas.height / 2);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '16px sans-serif';
+        ctx.fillText('Tap screen or press SPACE to Play Again', canvas.width / 2, canvas.height / 2 + 50);
+        ctx.textAlign = 'left';
+      }
+
+      if (isGameOver) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ff3b5c';
+        ctx.font = 'bold 36px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('GAME OVER', canvas.width / 2, 180);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '18px sans-serif';
+        ctx.fillText(`Final Score: ${Math.floor(score)}`, canvas.width / 2, 220);
+        ctx.fillText('Tap screen or press SPACE to Restart', canvas.width / 2, 260);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    function restartGame() {
+      dog.hp = 100;
+      dog.x = 100;
+      dog.y = 280;
+      dog.velocityY = 0;
+      dog.isDashing = false;
+      dog.isCrawling = false;
+      dog.dashCooldown = 0;
+      dog.facingDirection = -1;
+      tiger.x = -150;
+      tiger.active = false;
+      tiger.escaping = false;
+      obstacles = [];
+      cats = [];
+      eagles = [];
+      hpItems = [];
+      bombs = [];
+      explosionParticles = [];
+      scratchEffects = [];
+      healTexts = [];
+      score = 0;
+      nextHpScoreThreshold = 50;
+      gameTime = 0;
+      sunriseProgress = 0;
+      isGameOver = false;
+      isGameCleared = false;
+    }
+
+    function gameLoop() {
+      update();
+      render();
+      requestAnimationFrame(gameLoop);
+    }
+
+    gameLoop();
+  </script>
+</body>
+</html>
